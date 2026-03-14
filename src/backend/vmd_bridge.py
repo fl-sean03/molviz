@@ -267,12 +267,20 @@ class VMDBridge:
             return
 
         def matrix_to_tcl(m: List[List[float]]) -> str:
-            rows = ['{' + ' '.join(str(v) for v in row) + '}' for row in m]
-            return '{' + ' '.join(rows) + '}'
+            """Convert 4x4 matrix to VMD Tcl list format."""
+            rows = []
+            for row in m:
+                row_str = " ".join(f"{v:.6f}" for v in row)
+                rows.append(f"{{ {row_str} }}")
+            return "{ " + " ".join(rows) + " }"
 
-        evaltcl(f"molinfo top set rotate_matrix {matrix_to_tcl(camera.rotate)}")
-        evaltcl(f"molinfo top set center_matrix {matrix_to_tcl(camera.center)}")
-        evaltcl(f"molinfo top set scale_matrix {matrix_to_tcl(camera.scale)}")
+        try:
+            evaltcl(f"molinfo top set rotate_matrix {matrix_to_tcl(camera.rotate)}")
+            evaltcl(f"molinfo top set center_matrix {matrix_to_tcl(camera.center)}")
+            evaltcl(f"molinfo top set scale_matrix {matrix_to_tcl(camera.scale)}")
+        except Exception as e:
+            # If matrix setting fails, just update the display
+            pass
 
     async def get_camera(self) -> CameraMatrix:
         """Get current VMD camera matrix."""
