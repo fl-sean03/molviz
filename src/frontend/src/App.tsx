@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import FastViewport from './components/FastViewport';
 import VMDViewport from './components/VMDViewport';
 import Toolbar from './components/Toolbar';
@@ -23,7 +23,6 @@ const App: React.FC = () => {
     loading,
     loadStructure,
     updateCamera,
-    requestFrame,
     resetView
   } = useVMDConnection('ws://localhost:8765');
 
@@ -63,7 +62,6 @@ const App: React.FC = () => {
         onOpenLibrary={() => setShowLibrary(true)}
         onResetView={resetView}
         onSaveView={() => console.log('Save view')}
-        connected={connected}
         structurePath={structurePath}
       />
 
@@ -76,7 +74,6 @@ const App: React.FC = () => {
             <span className="viewport-fps">60 fps</span>
           </div>
           <FastViewport
-            structurePath={structurePath}
             pdbContent={pdbContent}
             camera={camera}
             onCameraChange={handleCameraChange}

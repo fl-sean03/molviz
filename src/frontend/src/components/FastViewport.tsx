@@ -9,14 +9,12 @@ declare global {
 }
 
 interface FastViewportProps {
-  structurePath: string | null;
   pdbContent: string | null;
   camera: CameraState;
   onCameraChange: (camera: CameraState) => void;
 }
 
 const FastViewport: React.FC<FastViewportProps> = ({
-  structurePath,
   pdbContent,
   camera,
   onCameraChange

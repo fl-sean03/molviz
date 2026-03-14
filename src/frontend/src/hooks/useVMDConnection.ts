@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CameraState, VMDCameraMatrix, StructureInfo, WSMessage } from '../types';
+import { CameraState, StructureInfo, WSMessage } from '../types';
 import { cameraToVMDMatrix } from '../utils/cameraConvert';
 
 interface UseVMDConnectionReturn {

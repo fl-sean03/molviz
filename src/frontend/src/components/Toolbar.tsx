@@ -4,7 +4,6 @@ interface ToolbarProps {
   onOpenLibrary: () => void;
   onResetView: () => void;
   onSaveView: () => void;
-  connected: boolean;
   structurePath: string | null;
 }
 
@@ -12,7 +11,6 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onOpenLibrary,
   onResetView,
   onSaveView,
-  connected,
   structurePath
 }) => {
   return (
