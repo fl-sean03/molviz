@@ -4,6 +4,7 @@ interface ToolbarProps {
   onOpenLibrary: () => void;
   onResetView: () => void;
   onSaveView: () => void;
+  onOpenSettings: () => void;
   structurePath: string | null;
 }
 
@@ -11,6 +12,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onOpenLibrary,
   onResetView,
   onSaveView,
+  onOpenSettings,
   structurePath
 }) => {
   return (
@@ -67,6 +69,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
         >
           <span className="btn-icon">📋</span>
           <span className="btn-label">Copy</span>
+        </button>
+
+        <button
+          className="toolbar-btn"
+          onClick={onOpenSettings}
+          title="Settings"
+        >
+          <span className="btn-icon">⚙️</span>
+          <span className="btn-label">Settings</span>
         </button>
       </div>
     </div>

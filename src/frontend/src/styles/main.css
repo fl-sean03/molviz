@@ -398,3 +398,178 @@
 .custom-path-input button:hover {
   background: var(--accent-hover);
 }
+
+/* Settings Modal */
+.settings-modal {
+  width: 500px;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.settings-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.connection-badge.connected {
+  background: rgba(74, 222, 128, 0.2);
+  color: var(--success);
+}
+
+.connection-badge.disconnected {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--warning);
+}
+
+.settings-input-group {
+  margin-bottom: 12px;
+}
+
+.settings-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: monospace;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.presets-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.preset-btn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.preset-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-secondary {
+  padding: 10px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-primary);
+}
+
+.btn-primary {
+  padding: 10px 16px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.settings-help {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+}
+
+.settings-help h3 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.settings-help p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.settings-help code {
+  display: block;
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--success);
+  margin: 8px 0;
+}
+
+.settings-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.settings-link a:hover {
+  text-decoration: underline;
+}
+
+/* Status bar button styling */
+.status-bar button.connection-status {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-bar button.connection-status:hover {
+  text-decoration: underline;
+}

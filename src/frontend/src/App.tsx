@@ -3,18 +3,24 @@ import FastViewport from './components/FastViewport';
 import VMDViewport from './components/VMDViewport';
 import Toolbar from './components/Toolbar';
 import StructureLibrary from './components/StructureLibrary';
+import SettingsModal from './components/SettingsModal';
 import { useVMDConnection } from './hooks/useVMDConnection';
+import { useSettings } from './hooks/useSettings';
 import { CameraState } from './types';
 
 const App: React.FC = () => {
   const [structurePath, setStructurePath] = useState<string | null>(null);
   const [structureData, setStructureData] = useState<any>(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [camera, setCamera] = useState<CameraState>({
     position: { x: 0, y: 0, z: 50 },
     rotation: { x: 0, y: 0, z: 0, w: 1 },
     zoom: 1.0
   });
+
+  // Settings (configurable backend URL)
+  const { backendUrl, setBackendUrl, resetBackendUrl } = useSettings();
 
   const {
     connected,
@@ -24,7 +30,7 @@ const App: React.FC = () => {
     loadStructure,
     updateCamera,
     resetView
-  } = useVMDConnection('ws://localhost:8765');
+  } = useVMDConnection(backendUrl);
 
   // Handle structure loading
   const handleLoadStructure = useCallback(async (path: string) => {
@@ -45,11 +51,15 @@ const App: React.FC = () => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (file && (file.name.endsWith('.pdb') || file.name.endsWith('.xyz'))) {
-      // In Electron, we'd get the file path
-      // For now, just show an alert
       console.log('Dropped file:', file.name);
     }
   }, []);
+
+  // Handle settings save (triggers reconnect)
+  const handleSettingsSave = useCallback((url: string) => {
+    setBackendUrl(url);
+    // Connection will automatically reconnect with new URL
+  }, [setBackendUrl]);
 
   return (
     <div
@@ -62,6 +72,7 @@ const App: React.FC = () => {
         onOpenLibrary={() => setShowLibrary(true)}
         onResetView={resetView}
         onSaveView={() => console.log('Save view')}
+        onOpenSettings={() => setShowSettings(true)}
         structurePath={structurePath}
       />
 
@@ -98,9 +109,13 @@ const App: React.FC = () => {
 
       {/* Bottom status bar */}
       <div className="status-bar">
-        <span className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
+        <button
+          className={`connection-status ${connected ? 'connected' : 'disconnected'}`}
+          onClick={() => setShowSettings(true)}
+          title="Click to configure backend"
+        >
           {connected ? '● Connected' : '○ Disconnected'}
-        </span>
+        </button>
         {structureData && (
           <span className="structure-info">
             {structureData.atom_count} atoms
@@ -116,6 +131,17 @@ const App: React.FC = () => {
         <StructureLibrary
           onSelect={handleLoadStructure}
           onClose={() => setShowLibrary(false)}
+        />
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <SettingsModal
+          backendUrl={backendUrl}
+          onSave={handleSettingsSave}
+          onReset={resetBackendUrl}
+          onClose={() => setShowSettings(false)}
+          connected={connected}
         />
       )}
     </div>
