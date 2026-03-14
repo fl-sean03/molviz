@@ -316,7 +316,7 @@ class VMDBridge:
         Args:
             width: Image width
             height: Image height
-            quality: "fast" or "high" (both use tachyon in headless mode)
+            quality: "fast" (OpenGL snapshot), "medium" (low-res tachyon), "high" (full tachyon)
 
         Returns:
             PNG image as bytes
@@ -326,26 +326,54 @@ class VMDBridge:
 
         from PIL import Image
 
-        # Always use Tachyon in headless mode (snapshot requires OpenGL display)
+        output_path = self.temp_dir / "frame.png"
+
+        if quality == "fast":
+            # Try OpenGL snapshot first (much faster)
+            try:
+                bmp_path = self.temp_dir / "frame.bmp"
+                # Set display size and render
+                evaltcl(f"display resize {width} {height}")
+                evaltcl("display update")
+                evaltcl(f'render snapshot "{bmp_path}"')
+
+                if bmp_path.exists():
+                    img = Image.open(bmp_path)
+                    img.save(output_path, "PNG")
+                    bmp_path.unlink()
+                    with open(output_path, 'rb') as f:
+                        return f.read()
+            except Exception as e:
+                # Fall back to tachyon if snapshot fails
+                pass
+
+        # Use Tachyon for medium/high quality or as fallback
         scene_path = self.temp_dir / "scene.dat"
         tga_path = self.temp_dir / "frame.tga"
-        output_path = self.temp_dir / "frame.png"
 
         # Generate Tachyon scene file
         evaltcl(f'render Tachyon "{scene_path}"')
 
+        # Adjust resolution for quality
+        if quality == "medium":
+            render_width, render_height = width // 2, height // 2
+        else:
+            render_width, render_height = width, height
+
         # Run tachyon renderer
         result = subprocess.run(
             ["tachyon", str(scene_path),
-             "-res", str(width), str(height),
+             "-res", str(render_width), str(render_height),
              "-format", "TGA", "-o", str(tga_path)],
             capture_output=True,
             text=True
         )
 
-        # Convert TGA to PNG
+        # Convert TGA to PNG (and upscale if medium quality)
         if tga_path.exists():
             img = Image.open(tga_path)
+            if quality == "medium" and (img.width != width or img.height != height):
+                img = img.resize((width, height), Image.Resampling.LANCZOS)
             img.save(output_path, "PNG")
             tga_path.unlink()
             if scene_path.exists():

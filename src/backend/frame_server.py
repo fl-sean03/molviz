@@ -298,20 +298,29 @@ class FrameServer:
         except Exception as e:
             await self._send_error(websocket, f"Render failed: {e}")
 
-    async def _render_and_broadcast_locked(self, width: int = 800, height: int = 600) -> None:
+    async def _render_and_broadcast_locked(self, width: int = 800, height: int = 600,
+                                            quality: str = "fast") -> None:
         """Render frame and broadcast to all clients. Must be called with _vmd_lock held."""
         now = time.time()
         if now - self._last_render_time < self._min_render_interval:
             return  # Skip frame
 
         try:
-            frame_b64 = await self.bridge.capture_frame_base64(width, height)
+            # Use smaller size for fast interactive updates
+            if quality == "fast":
+                render_width, render_height = 400, 300
+            else:
+                render_width, render_height = width, height
+
+            frame_b64 = await self.bridge.capture_frame_base64(render_width, render_height, quality)
             self._last_render_time = time.time()
 
             message = {
                 "type": "frame",
                 "data": frame_b64,
-                "timestamp": self._last_render_time
+                "timestamp": self._last_render_time,
+                "width": render_width,
+                "height": render_height
             }
 
             await self._broadcast(message)
