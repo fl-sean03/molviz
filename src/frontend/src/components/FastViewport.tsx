@@ -25,6 +25,10 @@ const FastViewport: React.FC<FastViewportProps> = ({
   const [viewerReady, setViewerReady] = useState(false);
   const initAttempted = useRef(false);
 
+  // Use ref to avoid stale closure in event listeners
+  const onCameraChangeRef = useRef(onCameraChange);
+  onCameraChangeRef.current = onCameraChange;
+
   // Initialize 3Dmol viewer
   useEffect(() => {
     if (initAttempted.current) return;
@@ -121,7 +125,7 @@ const FastViewport: React.FC<FastViewportProps> = ({
     });
   }, []);
 
-  // Emit camera change to parent
+  // Emit camera change to parent (uses ref to avoid stale closure)
   const emitCameraChange = useCallback(() => {
     if (!viewerRef.current) return;
 
@@ -144,11 +148,11 @@ const FastViewport: React.FC<FastViewportProps> = ({
         zoom: view[3] || 1
       };
 
-      onCameraChange(newCamera);
+      onCameraChangeRef.current(newCamera);
     } catch (e) {
       console.error('Failed to get camera:', e);
     }
-  }, [onCameraChange]);
+  }, []);
 
   // Load structure when PDB content is received
   useEffect(() => {
