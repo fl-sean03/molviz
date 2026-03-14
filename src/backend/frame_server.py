@@ -54,11 +54,14 @@ class FrameServer:
             {"type": "error", "message": "..."}
     """
 
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
         self.host = host
         self.port = port
         self.bridge: Optional[VMDBridge] = None
         self.clients: Set[WebSocketServerProtocol] = set()
+
+        # VMD operation lock - VMD is not thread-safe, serialize all operations
+        self._vmd_lock = asyncio.Lock()
 
         # Render queue management
         self._render_lock = asyncio.Lock()
@@ -160,11 +163,12 @@ class FrameServer:
         await asyncio.sleep(0.016)  # ~60fps debounce
 
         if self._pending_camera and self.bridge:
-            await self.bridge.set_camera(self._pending_camera)
-            self._pending_camera = None
+            async with self._vmd_lock:
+                await self.bridge.set_camera(self._pending_camera)
+                self._pending_camera = None
 
-            # Auto-render after camera change
-            await self._render_and_broadcast()
+                # Auto-render after camera change
+                await self._render_and_broadcast_locked()
 
     async def _handle_load_structure(self, websocket: WebSocketServerProtocol,
                                       payload: Dict[str, Any]) -> None:
@@ -175,30 +179,31 @@ class FrameServer:
             return
 
         try:
-            info = await self.bridge.load_structure(path)
+            async with self._vmd_lock:
+                info = await self.bridge.load_structure(path)
 
-            # Read PDB content for WebGL preview
-            pdb_content = ""
-            try:
-                with open(path, 'r') as f:
-                    pdb_content = f.read()
-            except Exception as e:
-                logger.warning(f"Could not read PDB content: {e}")
+                # Read PDB content for WebGL preview
+                pdb_content = ""
+                try:
+                    with open(path, 'r') as f:
+                        pdb_content = f.read()
+                except Exception as e:
+                    logger.warning(f"Could not read PDB content: {e}")
 
-            await self._send(websocket, {
-                "type": "structure_loaded",
-                "data": {
-                    "mol_id": info.mol_id,
-                    "path": info.path,
-                    "atom_count": info.atom_count,
-                    "residue_count": info.residue_count,
-                    "bounds": info.bounds,
-                    "pdb_content": pdb_content
-                }
-            })
+                await self._send(websocket, {
+                    "type": "structure_loaded",
+                    "data": {
+                        "mol_id": info.mol_id,
+                        "path": info.path,
+                        "atom_count": info.atom_count,
+                        "residue_count": info.residue_count,
+                        "bounds": info.bounds,
+                        "pdb_content": pdb_content
+                    }
+                })
 
-            # Send initial frame
-            await self._render_and_send(websocket)
+                # Send initial frame (already have lock)
+                await self._render_and_send_locked(websocket)
 
         except FileNotFoundError as e:
             await self._send_error(websocket, str(e))
@@ -210,7 +215,8 @@ class FrameServer:
         height = payload.get("height", 600)
         quality = payload.get("quality", "fast")
 
-        await self._render_and_send(websocket, width, height, quality)
+        async with self._vmd_lock:
+            await self._render_and_send_locked(websocket, width, height, quality)
 
     async def _handle_set_representation(self, websocket: WebSocketServerProtocol,
                                           payload: Dict[str, Any]) -> None:
@@ -226,8 +232,9 @@ class FrameServer:
             for r in reps_data
         ]
 
-        await self.bridge.set_representation(reps)
-        await self._render_and_send(websocket)
+        async with self._vmd_lock:
+            await self.bridge.set_representation(reps)
+            await self._render_and_send_locked(websocket)
 
     async def _handle_rotate(self, websocket: WebSocketServerProtocol,
                               payload: Dict[str, Any]) -> None:
@@ -235,17 +242,20 @@ class FrameServer:
         axis = payload.get("axis", "y")
         degrees = payload.get("degrees", 10)
 
-        await self.bridge.rotate(axis, degrees)
-        await self._render_and_broadcast()
+        async with self._vmd_lock:
+            await self.bridge.rotate(axis, degrees)
+            await self._render_and_broadcast_locked()
 
     async def _handle_reset_view(self, websocket: WebSocketServerProtocol) -> None:
         """Handle view reset."""
-        await self.bridge.reset_view()
-        await self._render_and_broadcast()
+        async with self._vmd_lock:
+            await self.bridge.reset_view()
+            await self._render_and_broadcast_locked()
 
     async def _handle_get_camera(self, websocket: WebSocketServerProtocol) -> None:
         """Handle camera query."""
-        camera = await self.bridge.get_camera()
+        async with self._vmd_lock:
+            camera = await self.bridge.get_camera()
         await self._send(websocket, {
             "type": "camera_update",
             "data": camera.to_dict()
@@ -255,56 +265,55 @@ class FrameServer:
                                    payload: Dict[str, Any]) -> None:
         """Handle arbitrary Tcl command."""
         command = payload.get("command", "")
-        result = await self.bridge.execute_tcl(command)
+        async with self._vmd_lock:
+            result = await self.bridge.execute_tcl(command)
         await self._send(websocket, {
             "type": "tcl_result",
             "data": {"command": command, "result": result}
         })
 
-    async def _render_and_send(self, websocket: WebSocketServerProtocol,
-                                width: int = 800, height: int = 600,
-                                quality: str = "fast") -> None:
-        """Render frame and send to specific client."""
-        async with self._render_lock:
-            # Rate limiting
-            now = time.time()
-            if now - self._last_render_time < self._min_render_interval:
-                await asyncio.sleep(self._min_render_interval)
+    async def _render_and_send_locked(self, websocket: WebSocketServerProtocol,
+                                        width: int = 800, height: int = 600,
+                                        quality: str = "fast") -> None:
+        """Render frame and send to specific client. Must be called with _vmd_lock held."""
+        # Rate limiting
+        now = time.time()
+        if now - self._last_render_time < self._min_render_interval:
+            await asyncio.sleep(self._min_render_interval)
 
-            try:
-                frame_b64 = await self.bridge.capture_frame_base64(width, height, quality)
-                self._last_render_time = time.time()
+        try:
+            frame_b64 = await self.bridge.capture_frame_base64(width, height, quality)
+            self._last_render_time = time.time()
 
-                await self._send(websocket, {
-                    "type": "frame",
-                    "data": frame_b64,
-                    "timestamp": self._last_render_time,
-                    "width": width,
-                    "height": height
-                })
-            except Exception as e:
-                await self._send_error(websocket, f"Render failed: {e}")
+            await self._send(websocket, {
+                "type": "frame",
+                "data": frame_b64,
+                "timestamp": self._last_render_time,
+                "width": width,
+                "height": height
+            })
+        except Exception as e:
+            await self._send_error(websocket, f"Render failed: {e}")
 
-    async def _render_and_broadcast(self, width: int = 800, height: int = 600) -> None:
-        """Render frame and broadcast to all clients."""
-        async with self._render_lock:
-            now = time.time()
-            if now - self._last_render_time < self._min_render_interval:
-                return  # Skip frame
+    async def _render_and_broadcast_locked(self, width: int = 800, height: int = 600) -> None:
+        """Render frame and broadcast to all clients. Must be called with _vmd_lock held."""
+        now = time.time()
+        if now - self._last_render_time < self._min_render_interval:
+            return  # Skip frame
 
-            try:
-                frame_b64 = await self.bridge.capture_frame_base64(width, height)
-                self._last_render_time = time.time()
+        try:
+            frame_b64 = await self.bridge.capture_frame_base64(width, height)
+            self._last_render_time = time.time()
 
-                message = {
-                    "type": "frame",
-                    "data": frame_b64,
-                    "timestamp": self._last_render_time
-                }
+            message = {
+                "type": "frame",
+                "data": frame_b64,
+                "timestamp": self._last_render_time
+            }
 
-                await self._broadcast(message)
-            except Exception as e:
-                logger.error(f"Broadcast render failed: {e}")
+            await self._broadcast(message)
+        except Exception as e:
+            logger.error(f"Broadcast render failed: {e}")
 
     async def _send(self, websocket: WebSocketServerProtocol,
                     message: Dict[str, Any]) -> None:
