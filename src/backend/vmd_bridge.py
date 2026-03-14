@@ -99,24 +99,26 @@ class VMDBridge:
         if self._started:
             return
 
-        # Start Xvfb
-        xvfb_cmd = [
-            "Xvfb",
-            f":{self.display_num}",
-            "-screen", "0", "1920x1080x24"
-        ]
+        # Check if DISPLAY is already set (e.g., by systemd service)
+        if 'DISPLAY' not in os.environ:
+            # Start Xvfb only if not already running
+            xvfb_cmd = [
+                "Xvfb",
+                f":{self.display_num}",
+                "-screen", "0", "1920x1080x24"
+            ]
 
-        self.xvfb_process = subprocess.Popen(
-            xvfb_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+            self.xvfb_process = subprocess.Popen(
+                xvfb_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
 
-        # Set display environment
-        os.environ['DISPLAY'] = f":{self.display_num}"
+            # Set display environment
+            os.environ['DISPLAY'] = f":{self.display_num}"
 
-        # Wait for Xvfb to start
-        await asyncio.sleep(0.5)
+            # Wait for Xvfb to start
+            await asyncio.sleep(0.5)
 
         if not VMD_AVAILABLE:
             raise RuntimeError("vmd-python not available. Run in molviz conda environment.")
