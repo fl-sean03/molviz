@@ -70,7 +70,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 Local
               </button>
-              {/* Add more presets as backends are deployed */}
+              <button
+                className="preset-btn"
+                onClick={() => handlePreset(BACKEND_PRESETS.cloud)}
+              >
+                Cloud
+              </button>
             </div>
           </div>
 
