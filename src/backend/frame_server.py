@@ -20,7 +20,7 @@ from websockets.server import WebSocketServerProtocol
 
 from vmd_bridge import VMDBridge, CameraMatrix, Representation
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -149,6 +149,7 @@ class FrameServer:
     async def _handle_set_camera(self, websocket: WebSocketServerProtocol,
                                   payload: Dict[str, Any]) -> None:
         """Handle camera update with debouncing."""
+        logger.debug(f"Received camera update: zoom={payload.get('scale', [[1]])[0][0]:.3f}")
         camera = CameraMatrix.from_dict(payload)
         self._pending_camera = camera
 
@@ -163,12 +164,14 @@ class FrameServer:
         await asyncio.sleep(0.016)  # ~60fps debounce
 
         if self._pending_camera and self.bridge:
+            logger.info("Applying camera update and rendering")
             async with self._vmd_lock:
                 await self.bridge.set_camera(self._pending_camera)
                 self._pending_camera = None
 
                 # Auto-render after camera change
                 await self._render_and_broadcast_locked()
+            logger.info("Camera update complete")
 
     async def _handle_load_structure(self, websocket: WebSocketServerProtocol,
                                       payload: Dict[str, Any]) -> None:
