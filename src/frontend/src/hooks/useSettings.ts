@@ -10,7 +10,7 @@
 import { useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'molviz_backend_url';
-const DEFAULT_URL = 'ws://localhost:8765';
+const DEFAULT_URL = 'wss://87-99-131-239.nip.io';
 
 // Known backend presets
 export const BACKEND_PRESETS = {
