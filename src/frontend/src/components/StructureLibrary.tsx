@@ -21,28 +21,28 @@ const StructureLibrary: React.FC<StructureLibraryProps> = ({ onSelect, onClose }
   // Fetch structures from database
   useEffect(() => {
     // TODO: Fetch from API
-    // For now, use sample data
+    // Sample structures available on the cloud backend
     setStructures([
       {
         id: 1,
-        name: 'Flat on 111',
-        path: '/home/sf2/LabWork/Workspace/31-Hydrogenation/presentations/2026-03-13-comprehensive-update/figures/vmd_configs/final/01_flat_6deg.pdb',
-        atom_count: 601,
-        created_at: '2026-03-13'
+        name: 'Crambin',
+        path: '/home/molviz/molviz/data/1crn.pdb',
+        atom_count: 327,
+        created_at: 'PDB: 1CRN'
       },
       {
         id: 2,
-        name: 'Tilted 36°',
-        path: '/home/sf2/LabWork/Workspace/31-Hydrogenation/presentations/2026-03-13-comprehensive-update/figures/vmd_configs/final/07_tilted_36deg.pdb',
-        atom_count: 580,
-        created_at: '2026-03-13'
+        name: 'Ubiquitin',
+        path: '/home/molviz/molviz/data/1ubq.pdb',
+        atom_count: 660,
+        created_at: 'PDB: 1UBQ'
       },
       {
         id: 3,
-        name: 'Edge-on 82°',
-        path: '/home/sf2/LabWork/Workspace/31-Hydrogenation/presentations/2026-03-13-comprehensive-update/figures/vmd_configs/final/12_edge_on_82deg.pdb',
-        atom_count: 595,
-        created_at: '2026-03-13'
+        name: 'Porin',
+        path: '/home/molviz/molviz/data/2por.pdb',
+        atom_count: 4854,
+        created_at: 'PDB: 2POR'
       }
     ]);
   }, []);
