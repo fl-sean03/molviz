@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { CameraState } from '../types';
 
 // 3Dmol.js types
@@ -22,33 +22,63 @@ const FastViewport: React.FC<FastViewportProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const isUserInteracting = useRef(false);
+  const [viewerReady, setViewerReady] = useState(false);
+  const initAttempted = useRef(false);
 
   // Initialize 3Dmol viewer
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (initAttempted.current) return;
+    initAttempted.current = true;
 
     // Load 3Dmol.js from CDN if not available
     if (!window.$3Dmol) {
       const script = document.createElement('script');
       script.src = 'https://3dmol.org/build/3Dmol-min.js';
-      script.onload = () => initViewer();
+      script.onload = () => {
+        // Wait for next frame to ensure DOM is ready
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => initViewer());
+        });
+      };
       document.head.appendChild(script);
     } else {
-      initViewer();
+      // Already loaded, init on next frame
+      requestAnimationFrame(() => initViewer());
     }
 
     function initViewer() {
-      const config = {
-        backgroundColor: 'white',
-        antialias: true
-      };
+      const container = containerRef.current;
+      if (!container) {
+        console.warn('3Dmol container not ready, retrying...');
+        setTimeout(() => initViewer(), 100);
+        return;
+      }
 
-      viewerRef.current = window.$3Dmol.createViewer(containerRef.current, config);
-      viewerRef.current.setViewStyle({ style: 'outline' });
-      viewerRef.current.render();
+      // Ensure container has dimensions
+      if (container.clientWidth === 0 || container.clientHeight === 0) {
+        console.warn('3Dmol container has no size, retrying...');
+        setTimeout(() => initViewer(), 100);
+        return;
+      }
 
-      // Add mouse event listeners for camera tracking
-      setupMouseTracking();
+      try {
+        const config = {
+          backgroundColor: 'white',
+          antialias: true
+        };
+
+        viewerRef.current = window.$3Dmol.createViewer(container, config);
+        if (viewerRef.current) {
+          viewerRef.current.setViewStyle({ style: 'outline' });
+          viewerRef.current.render();
+          setViewerReady(true);
+
+          // Add mouse event listeners for camera tracking
+          setupMouseTracking();
+        }
+      } catch (err) {
+        console.error('Failed to initialize 3Dmol viewer:', err);
+      }
     }
 
     return () => {
@@ -122,7 +152,7 @@ const FastViewport: React.FC<FastViewportProps> = ({
 
   // Load structure when PDB content is received
   useEffect(() => {
-    if (!viewerRef.current || !pdbContent) return;
+    if (!viewerReady || !viewerRef.current || !pdbContent) return;
 
     try {
       viewerRef.current.removeAllModels();
@@ -154,11 +184,11 @@ const FastViewport: React.FC<FastViewportProps> = ({
     } catch (err) {
       console.error('Failed to load structure:', err);
     }
-  }, [pdbContent]);
+  }, [pdbContent, viewerReady]);
 
   // Sync camera from parent (when VMD updates)
   useEffect(() => {
-    if (!viewerRef.current || isUserInteracting.current) return;
+    if (!viewerReady || !viewerRef.current || isUserInteracting.current) return;
 
     try {
       viewerRef.current.setView([
@@ -175,7 +205,7 @@ const FastViewport: React.FC<FastViewportProps> = ({
     } catch (e) {
       // Ignore errors during rapid updates
     }
-  }, [camera]);
+  }, [camera, viewerReady]);
 
   return (
     <div
