@@ -15,7 +15,7 @@ const DEFAULT_URL = 'ws://localhost:8765';
 // Known backend presets
 export const BACKEND_PRESETS = {
   local: 'ws://localhost:8765',
-  cloud: 'ws://87.99.131.239:8765',
+  cloud: 'wss://87-99-131-239.nip.io',
 } as const;
 
 function getInitialBackendUrl(): string {
