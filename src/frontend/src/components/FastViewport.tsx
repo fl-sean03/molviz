@@ -269,7 +269,7 @@ const FastViewport: React.FC<FastViewportProps> = ({
     }
   }, [camera, viewerReady]);
 
-  // Show error message if WebGL failed
+  // Show error message if WebGL failed - but app still works with VMD pane
   if (webglError) {
     return (
       <div
@@ -280,15 +280,22 @@ const FastViewport: React.FC<FastViewportProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: '#f5f5f5',
-          color: '#666',
+          backgroundColor: '#2a2a2a',
+          color: '#999',
           padding: '20px',
-          textAlign: 'center'
+          textAlign: 'center',
+          flexDirection: 'column',
+          gap: '12px'
         }}
       >
-        <div>
-          <div style={{ fontSize: '14px', marginBottom: '8px' }}>⚠️ WebGL Error</div>
-          <div style={{ fontSize: '12px' }}>{webglError}</div>
+        <div style={{ fontSize: '13px' }}>WebGL Preview Unavailable</div>
+        <div style={{ fontSize: '11px', lineHeight: '1.5', maxWidth: '280px' }}>
+          Use the VMD Quality pane on the right.
+          <br /><br />
+          <span style={{ color: '#666' }}>
+            To fix: Enable hardware acceleration in browser settings,
+            or try a different browser (Chrome/Firefox).
+          </span>
         </div>
       </div>
     );
