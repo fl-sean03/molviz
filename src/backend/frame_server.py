@@ -306,11 +306,11 @@ class FrameServer:
             return  # Skip frame
 
         try:
-            # Balance speed vs quality for interactive updates
+            # Resolution settings - TachyonInternal is fast enough for higher res
             if quality == "fast":
-                render_width, render_height = 500, 375  # Fast interactive
+                render_width, render_height = 800, 600  # Good quality, still fast
             elif quality == "medium":
-                render_width, render_height = 800, 600
+                render_width, render_height = 1000, 750
             else:
                 render_width, render_height = max(width, 1200), max(height, 900)
 
