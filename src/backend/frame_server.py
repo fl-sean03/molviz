@@ -306,9 +306,10 @@ class FrameServer:
             return  # Skip frame
 
         try:
-            # Use reasonable size for interactive updates
-            # 400x300 was too blurry - increase to match modern displays
+            # Balance speed vs quality for interactive updates
             if quality == "fast":
+                render_width, render_height = 500, 375  # Fast interactive
+            elif quality == "medium":
                 render_width, render_height = 800, 600
             else:
                 render_width, render_height = max(width, 1200), max(height, 900)

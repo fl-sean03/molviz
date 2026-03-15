@@ -389,43 +389,45 @@ class VMDBridge:
         # Generate Tachyon scene file
         _evaltcl(f'render Tachyon "{scene_path}"')
 
-        # Adjust resolution for quality
-        # Render at target resolution to avoid blur from upscaling
-        if quality == "fast":
-            render_width, render_height = width, height  # Full resolution
-        elif quality == "medium":
-            render_width, render_height = width, height
-        else:
-            render_width, render_height = width, height
+        # Render at requested resolution
+        render_width, render_height = width, height
 
-        # Run tachyon renderer
+        # Run tachyon renderer with speed optimizations
         tachyon_args = ["tachyon", str(scene_path),
                         "-res", str(render_width), str(render_height),
                         "-format", "TGA", "-o", str(tga_path)]
 
-        # Add antialiasing for better quality (1 sample is fast but helps edges)
+        # Speed vs quality tradeoffs
         if quality == "fast":
-            tachyon_args.extend(["-aasamples", "1"])
+            # Maximum speed: no AA, medium shading
+            tachyon_args.extend(["-aasamples", "0", "-mediumshade"])
         elif quality == "medium":
-            tachyon_args.extend(["-aasamples", "2"])
+            tachyon_args.extend(["-aasamples", "1"])
         else:
             tachyon_args.extend(["-aasamples", "4"])
 
         result = subprocess.run(tachyon_args, capture_output=True, text=True)
 
-        # Convert TGA to PNG (and upscale if needed)
+        # Convert TGA to JPEG for faster encoding and smaller size
         if tga_path.exists():
             img = Image.open(tga_path)
-            # Upscale to target size for display
-            if img.width != width or img.height != height:
-                img = img.resize((width, height), Image.Resampling.BILINEAR)
-            img.save(output_path, "PNG", optimize=False)
-            tga_path.unlink()
-            if scene_path.exists():
-                scene_path.unlink()
 
-            with open(output_path, 'rb') as f:
-                return f.read()
+            # Use JPEG for fast mode (faster encoding, smaller transfer)
+            if quality == "fast":
+                jpeg_path = self.temp_dir / "frame.jpg"
+                img.save(jpeg_path, "JPEG", quality=85, optimize=False)
+                tga_path.unlink()
+                if scene_path.exists():
+                    scene_path.unlink()
+                with open(jpeg_path, 'rb') as f:
+                    return f.read()
+            else:
+                img.save(output_path, "PNG", optimize=False)
+                tga_path.unlink()
+                if scene_path.exists():
+                    scene_path.unlink()
+                with open(output_path, 'rb') as f:
+                    return f.read()
 
         # If tachyon failed, raise error with details
         raise RuntimeError(f"Tachyon render failed: {result.stderr}")
