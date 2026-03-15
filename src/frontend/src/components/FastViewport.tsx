@@ -14,19 +14,6 @@ interface FastViewportProps {
   onCameraChange: (camera: CameraState) => void;
 }
 
-/**
- * Check if WebGL is available in the browser
- */
-function isWebGLAvailable(): boolean {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    return gl !== null;
-  } catch (e) {
-    return false;
-  }
-}
-
 const FastViewport: React.FC<FastViewportProps> = ({
   pdbContent,
   camera,
@@ -46,11 +33,8 @@ const FastViewport: React.FC<FastViewportProps> = ({
 
   // Initialize 3Dmol viewer
   useEffect(() => {
-    // Check WebGL availability first
-    if (!isWebGLAvailable()) {
-      setWebglError('WebGL is not available in your browser');
-      return;
-    }
+    // Skip WebGL pre-check - let 3Dmol.js handle it
+    // The pre-check was causing false negatives on some browsers
 
     // Load 3Dmol.js from CDN if not available
     if (!window.$3Dmol) {
