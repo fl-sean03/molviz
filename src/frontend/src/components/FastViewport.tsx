@@ -14,6 +14,19 @@ interface FastViewportProps {
   onCameraChange: (camera: CameraState) => void;
 }
 
+/**
+ * Check if WebGL is available in the browser
+ */
+function isWebGLAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    return gl !== null;
+  } catch (e) {
+    return false;
+  }
+}
+
 const FastViewport: React.FC<FastViewportProps> = ({
   pdbContent,
   camera,
@@ -23,7 +36,9 @@ const FastViewport: React.FC<FastViewportProps> = ({
   const viewerRef = useRef<any>(null);
   const isUserInteracting = useRef(false);
   const [viewerReady, setViewerReady] = useState(false);
-  const initAttempted = useRef(false);
+  const [webglError, setWebglError] = useState<string | null>(null);
+  const initRetryCount = useRef(0);
+  const maxRetries = 5;
 
   // Use ref to avoid stale closure in event listeners
   const onCameraChangeRef = useRef(onCameraChange);
@@ -31,8 +46,11 @@ const FastViewport: React.FC<FastViewportProps> = ({
 
   // Initialize 3Dmol viewer
   useEffect(() => {
-    if (initAttempted.current) return;
-    initAttempted.current = true;
+    // Check WebGL availability first
+    if (!isWebGLAvailable()) {
+      setWebglError('WebGL is not available in your browser');
+      return;
+    }
 
     // Load 3Dmol.js from CDN if not available
     if (!window.$3Dmol) {
@@ -44,6 +62,9 @@ const FastViewport: React.FC<FastViewportProps> = ({
           requestAnimationFrame(() => initViewer());
         });
       };
+      script.onerror = () => {
+        setWebglError('Failed to load 3Dmol.js library');
+      };
       document.head.appendChild(script);
     } else {
       // Already loaded, init on next frame
@@ -53,16 +74,32 @@ const FastViewport: React.FC<FastViewportProps> = ({
     function initViewer() {
       const container = containerRef.current;
       if (!container) {
-        console.warn('3Dmol container not ready, retrying...');
-        setTimeout(() => initViewer(), 100);
+        if (initRetryCount.current < maxRetries) {
+          initRetryCount.current++;
+          console.warn(`3Dmol container not ready, retry ${initRetryCount.current}/${maxRetries}...`);
+          setTimeout(() => initViewer(), 100);
+        } else {
+          setWebglError('Failed to initialize viewer: container not available');
+        }
         return;
       }
 
       // Ensure container has dimensions
       if (container.clientWidth === 0 || container.clientHeight === 0) {
-        console.warn('3Dmol container has no size, retrying...');
-        setTimeout(() => initViewer(), 100);
+        if (initRetryCount.current < maxRetries) {
+          initRetryCount.current++;
+          console.warn(`3Dmol container has no size, retry ${initRetryCount.current}/${maxRetries}...`);
+          setTimeout(() => initViewer(), 100);
+        } else {
+          setWebglError('Failed to initialize viewer: container has no dimensions');
+        }
         return;
+      }
+
+      // Clean up any existing canvas elements from previous failed attempts
+      const existingCanvas = container.querySelector('canvas');
+      if (existingCanvas) {
+        existingCanvas.remove();
       }
 
       try {
@@ -72,22 +109,53 @@ const FastViewport: React.FC<FastViewportProps> = ({
         };
 
         viewerRef.current = window.$3Dmol.createViewer(container, config);
-        if (viewerRef.current) {
-          viewerRef.current.setViewStyle({ style: 'outline' });
-          viewerRef.current.render();
-          setViewerReady(true);
 
-          // Add mouse event listeners for camera tracking
-          setupMouseTracking();
+        // Verify the viewer was created properly with a valid GL context
+        if (!viewerRef.current) {
+          throw new Error('createViewer returned null');
         }
+
+        // Try a test render to verify GL context is valid
+        viewerRef.current.setViewStyle({ style: 'outline' });
+        viewerRef.current.render();
+
+        setViewerReady(true);
+        setWebglError(null);
+
+        // Add mouse event listeners for camera tracking
+        setupMouseTracking();
       } catch (err) {
         console.error('Failed to initialize 3Dmol viewer:', err);
+
+        // Clean up failed viewer
+        if (viewerRef.current) {
+          try {
+            viewerRef.current.clear();
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          viewerRef.current = null;
+        }
+
+        // Retry initialization
+        if (initRetryCount.current < maxRetries) {
+          initRetryCount.current++;
+          console.warn(`Retrying viewer init ${initRetryCount.current}/${maxRetries}...`);
+          setTimeout(() => initViewer(), 200);
+        } else {
+          setWebglError(`WebGL initialization failed: ${err}`);
+        }
       }
     }
 
     return () => {
       if (viewerRef.current) {
-        // Cleanup if needed
+        try {
+          viewerRef.current.clear();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        viewerRef.current = null;
       }
     };
   }, []);
@@ -185,6 +253,12 @@ const FastViewport: React.FC<FastViewportProps> = ({
 
       viewerRef.current.zoomTo();
       viewerRef.current.render();
+
+      // Emit initial camera state after structure loads
+      // This ensures the correct initial zoom is captured for sync
+      setTimeout(() => {
+        emitCameraChange();
+      }, 100);
     } catch (err) {
       console.error('Failed to load structure:', err);
     }
@@ -210,6 +284,31 @@ const FastViewport: React.FC<FastViewportProps> = ({
       // Ignore errors during rapid updates
     }
   }, [camera, viewerReady]);
+
+  // Show error message if WebGL failed
+  if (webglError) {
+    return (
+      <div
+        className="viewport-canvas"
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#f5f5f5',
+          color: '#666',
+          padding: '20px',
+          textAlign: 'center'
+        }}
+      >
+        <div>
+          <div style={{ fontSize: '14px', marginBottom: '8px' }}>⚠️ WebGL Error</div>
+          <div style={{ fontSize: '12px' }}>{webglError}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

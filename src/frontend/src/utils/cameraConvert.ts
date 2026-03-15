@@ -70,10 +70,8 @@ function identityMatrix(): number[][] {
   ];
 }
 
-/**
- * Create translation matrix.
- */
-function translationMatrix(x: number, y: number, z: number): number[][] {
+// Translation matrix factory - exported for potential future use
+export function createTranslationMatrix(x: number, y: number, z: number): number[][] {
   return [
     [1, 0, 0, x],
     [0, 1, 0, y],
@@ -94,30 +92,83 @@ function scaleMatrix(s: number): number[][] {
   ];
 }
 
+// Store VMD's initial scale after structure load
+let vmdInitialScale: number[][] | null = null;
+let vmdInitialCenter: number[][] | null = null;
+let initialWebGLZoom: number | null = null;
+
+/**
+ * Set VMD's initial camera state (called after structure load).
+ */
+export function setVMDInitialCamera(scale: number[][], center: number[][]): void {
+  vmdInitialScale = scale;
+  vmdInitialCenter = center;
+}
+
+/**
+ * Set the initial WebGL zoom value (called after structure load).
+ */
+export function setInitialWebGLZoom(zoom: number): void {
+  initialWebGLZoom = zoom;
+}
+
+/**
+ * Apply zoom ratio to a scale matrix.
+ */
+function applyZoomToScale(baseScale: number[][], zoomRatio: number): number[][] {
+  return [
+    [baseScale[0][0] * zoomRatio, baseScale[0][1], baseScale[0][2], baseScale[0][3]],
+    [baseScale[1][0], baseScale[1][1] * zoomRatio, baseScale[1][2], baseScale[1][3]],
+    [baseScale[2][0], baseScale[2][1], baseScale[2][2] * zoomRatio, baseScale[2][3]],
+    [baseScale[3][0], baseScale[3][1], baseScale[3][2], baseScale[3][3]]
+  ];
+}
+
 /**
  * Convert 3Dmol.js camera state to VMD matrix format.
+ *
+ * VMD and 3Dmol.js use different coordinate systems:
+ * - 3Dmol.js: OpenGL style (Y up, Z toward viewer)
+ * - VMD: X right, Y up, Z out of screen
+ *
+ * We sync both rotation and zoom.
  */
 export function cameraToVMDMatrix(camera: CameraState): VMDCameraMatrix {
-  // VMD uses different coordinate conventions
-  // We need to apply some transformations
+  // Convert quaternion with coordinate system adjustment
+  // VMD expects rotations in its own coordinate space
+  // Negate Y and Z components to match VMD's convention
+  const adjustedQ: Quaternion = {
+    x: camera.rotation.x,
+    y: -camera.rotation.y,
+    z: -camera.rotation.z,
+    w: camera.rotation.w
+  };
 
-  // Rotation matrix from quaternion
-  const rotate = quaternionToMatrix(camera.rotation);
+  // Rotation matrix from adjusted quaternion
+  const rotate = quaternionToMatrix(adjustedQ);
 
-  // Center matrix (translation)
-  // VMD center is relative to molecule center
-  const center = translationMatrix(
-    -camera.position.x,
-    -camera.position.y,
-    -camera.position.z
-  );
+  // Calculate zoom ratio relative to initial zoom
+  // 3Dmol.js zoom: higher value = camera further = zoomed out
+  // VMD scale: higher value = molecule larger = zoomed in
+  // To sync: when WebGL zooms in (zoom decreases), VMD should zoom in (scale increases)
+  let zoomRatio = 1.0;
+  if (initialWebGLZoom && initialWebGLZoom > 0 && camera.zoom > 0) {
+    // Use current/initial so that:
+    // - Zoom in (smaller zoom value) → smaller ratio → VMD scales down... wait that's wrong
+    // Actually: when user zooms IN, 3Dmol zoom value INCREASES (not decreases)
+    // So: current > initial means zoomed in, use current/initial
+    zoomRatio = camera.zoom / initialWebGLZoom;
+    // Clamp to prevent extreme values
+    zoomRatio = Math.max(0.1, Math.min(10.0, zoomRatio));
+  }
 
-  // Scale matrix
-  const scale = scaleMatrix(camera.zoom);
+  // Apply zoom ratio to VMD's initial scale
+  const baseScale = vmdInitialScale || scaleMatrix(1.0);
+  const scale = applyZoomToScale(baseScale, zoomRatio);
 
-  // Global is typically the combined transformation
-  // For simplicity, we'll compute it as scale * rotate * center
-  // (VMD may use different order, adjust as needed)
+  const center = vmdInitialCenter || identityMatrix();
+
+  // Global is typically identity
   const global_ = identityMatrix();
 
   return { rotate, center, scale, global: global_ };

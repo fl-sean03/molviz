@@ -306,11 +306,12 @@ class FrameServer:
             return  # Skip frame
 
         try:
-            # Use smaller size for fast interactive updates
+            # Use reasonable size for interactive updates
+            # 400x300 was too blurry - increase to match modern displays
             if quality == "fast":
-                render_width, render_height = 400, 300
+                render_width, render_height = 800, 600
             else:
-                render_width, render_height = width, height
+                render_width, render_height = max(width, 1200), max(height, 900)
 
             frame_b64 = await self.bridge.capture_frame_base64(render_width, render_height, quality)
             self._last_render_time = time.time()

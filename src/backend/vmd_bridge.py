@@ -3,6 +3,9 @@ VMD Bridge - Control headless VMD and capture frames.
 
 This module provides a Python interface to control VMD running in headless mode,
 send Tcl commands, and capture rendered frames.
+
+IMPORTANT: All VMD operations must run in a dedicated thread to avoid SEGV crashes.
+VMD's C extensions are not safe to call from asyncio coroutines.
 """
 
 import asyncio
@@ -14,6 +17,8 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 import base64
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Will be imported when running in vmd-env
 try:
@@ -22,6 +27,9 @@ try:
     VMD_AVAILABLE = True
 except ImportError:
     VMD_AVAILABLE = False
+
+# Single thread executor for all VMD operations - VMD is not thread-safe
+_vmd_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vmd")
 
 
 @dataclass
@@ -93,6 +101,22 @@ class VMDBridge:
         self.current_mol_id: Optional[int] = None
         self.temp_dir = Path(tempfile.mkdtemp(prefix="molviz_"))
         self._started = False
+        self._vmd_thread_id: Optional[int] = None
+
+    def _run_in_vmd_thread(self, func, *args, **kwargs):
+        """Run a function in the VMD thread synchronously."""
+        loop = asyncio.get_event_loop()
+        return loop.run_in_executor(_vmd_executor, lambda: func(*args, **kwargs))
+
+    def _init_vmd_sync(self) -> None:
+        """Initialize VMD - must run in VMD thread."""
+        self._vmd_thread_id = threading.current_thread().ident
+        evaltcl("display projection Orthographic")
+        evaltcl("display depthcue off")
+        evaltcl("color Display Background white")
+        evaltcl("axes location Off")
+        evaltcl("display shadows on")
+        evaltcl("display ambientocclusion on")
 
     async def start(self) -> None:
         """Start Xvfb and initialize VMD."""
@@ -123,13 +147,8 @@ class VMDBridge:
         if not VMD_AVAILABLE:
             raise RuntimeError("vmd-python not available. Run in molviz conda environment.")
 
-        # Initialize VMD display settings
-        evaltcl("display projection Orthographic")
-        evaltcl("display depthcue off")
-        evaltcl("color Display Background white")
-        evaltcl("axes location Off")
-        evaltcl("display shadows on")
-        evaltcl("display ambientocclusion on")
+        # Initialize VMD in dedicated thread
+        await self._run_in_vmd_thread(self._init_vmd_sync)
 
         self._started = True
 
@@ -145,6 +164,36 @@ class VMDBridge:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
         self._started = False
+
+    def _load_structure_sync(self, path_str: str, file_type: str) -> tuple:
+        """Load structure in VMD thread - returns (mol_id, atom_count, residue_count, minmax_str)."""
+        # Clear existing molecules
+        for i in range(molecule.num()):
+            molecule.delete(molecule.listall()[0])
+
+        # Load new molecule
+        mol_id = molecule.load(file_type, path_str)
+        molecule.set_top(mol_id)
+
+        # Get structure info
+        atom_count = molecule.numatoms(mol_id)
+        try:
+            residue_count = int(evaltcl(f"llength [lsort -unique [[atomselect {mol_id} all] get resid]]"))
+        except:
+            residue_count = 1
+
+        # Get bounding box
+        evaltcl("set sel [atomselect top all]")
+        minmax = evaltcl("measure minmax $sel")
+        evaltcl("$sel delete")
+
+        # Setup default representation
+        self._setup_default_representation_sync(mol_id)
+
+        # Reset view
+        evaltcl("display resetview")
+
+        return mol_id, atom_count, residue_count, minmax
 
     async def load_structure(self, path: str) -> StructureInfo:
         """Load a molecular structure into VMD."""
@@ -163,35 +212,15 @@ class VMDBridge:
             '.mol2': 'mol2',
         }.get(suffix, 'pdb')
 
-        # Clear existing molecules
-        for i in range(molecule.num()):
-            molecule.delete(molecule.listall()[0])
+        # Run VMD operations in dedicated thread
+        mol_id, atom_count, residue_count, minmax = await self._run_in_vmd_thread(
+            self._load_structure_sync, str(path), file_type
+        )
 
-        # Load new molecule
-        mol_id = molecule.load(file_type, str(path))
-        molecule.set_top(mol_id)
         self.current_mol_id = mol_id
-
-        # Get structure info
-        atom_count = molecule.numatoms(mol_id)
-        try:
-            residue_count = int(evaltcl(f"llength [lsort -unique [[atomselect {mol_id} all] get resid]]"))
-        except:
-            residue_count = 1
-
-        # Get bounding box
-        evaltcl("set sel [atomselect top all]")
-        minmax = evaltcl("measure minmax $sel")
-        evaltcl("$sel delete")
 
         # Parse minmax result: {{x1 y1 z1} {x2 y2 z2}}
         bounds = self._parse_minmax(minmax)
-
-        # Setup default representation
-        await self._setup_default_representation(mol_id)
-
-        # Reset view
-        evaltcl("display resetview")
 
         return StructureInfo(
             mol_id=mol_id,
@@ -201,8 +230,8 @@ class VMDBridge:
             bounds=bounds
         )
 
-    async def _setup_default_representation(self, mol_id: int) -> None:
-        """Setup default molecular representation using Tcl commands."""
+    def _setup_default_representation_sync(self, mol_id: int) -> None:
+        """Setup default molecular representation using Tcl commands. Must run in VMD thread."""
         # Delete default rep
         while molrep.num(mol_id) > 0:
             molrep.delrep(mol_id, 0)
@@ -251,6 +280,10 @@ class VMDBridge:
             evaltcl('mol material AOShiny')
             evaltcl('mol addrep top')
 
+    async def _setup_default_representation(self, mol_id: int) -> None:
+        """Setup default molecular representation - async wrapper."""
+        await self._run_in_vmd_thread(self._setup_default_representation_sync, mol_id)
+
     def _parse_minmax(self, minmax_str: str) -> List[float]:
         """Parse VMD minmax output."""
         try:
@@ -261,11 +294,8 @@ class VMDBridge:
         except:
             return [0, 0, 0, 10, 10, 10]
 
-    async def set_camera(self, camera: CameraMatrix) -> None:
-        """Set VMD camera from matrix."""
-        if self.current_mol_id is None:
-            return
-
+    def _set_camera_sync(self, camera: CameraMatrix) -> None:
+        """Set VMD camera - must run in VMD thread."""
         def matrix_to_tcl(m: List[List[float]]) -> str:
             """Convert 4x4 matrix to VMD Tcl list format.
 
@@ -287,11 +317,14 @@ class VMDBridge:
             import logging
             logging.getLogger(__name__).error(f"Failed to set camera: {e}")
 
-    async def get_camera(self) -> CameraMatrix:
-        """Get current VMD camera matrix."""
+    async def set_camera(self, camera: CameraMatrix) -> None:
+        """Set VMD camera from matrix."""
         if self.current_mol_id is None:
-            return CameraMatrix.identity()
+            return
+        await self._run_in_vmd_thread(self._set_camera_sync, camera)
 
+    def _get_camera_sync(self) -> CameraMatrix:
+        """Get current VMD camera matrix - must run in VMD thread."""
         def parse_matrix(tcl_result: str) -> List[List[float]]:
             """Parse Tcl matrix format to Python list."""
             import re
@@ -313,22 +346,14 @@ class VMDBridge:
             global_=global_
         )
 
-    async def capture_frame(self, width: int = 800, height: int = 600,
-                            quality: str = "fast") -> bytes:
-        """
-        Render and capture current frame.
-
-        Args:
-            width: Image width
-            height: Image height
-            quality: "fast" (low-res tachyon), "medium" (half-res), "high" (full res)
-
-        Returns:
-            PNG image as bytes
-        """
+    async def get_camera(self) -> CameraMatrix:
+        """Get current VMD camera matrix."""
         if self.current_mol_id is None:
-            raise RuntimeError("No structure loaded")
+            return CameraMatrix.identity()
+        return await self._run_in_vmd_thread(self._get_camera_sync)
 
+    def _capture_frame_sync(self, width: int, height: int, quality: str) -> bytes:
+        """Capture frame - must run in VMD thread."""
         from PIL import Image
 
         output_path = self.temp_dir / "frame.png"
@@ -338,22 +363,27 @@ class VMDBridge:
         # Generate Tachyon scene file
         evaltcl(f'render Tachyon "{scene_path}"')
 
-        # Adjust resolution for quality - use very low res for "fast" interactive updates
+        # Adjust resolution for quality
+        # Render at target resolution to avoid blur from upscaling
         if quality == "fast":
-            render_width, render_height = 200, 150  # Very low res for speed
+            render_width, render_height = width, height  # Full resolution
         elif quality == "medium":
-            render_width, render_height = width // 2, height // 2
+            render_width, render_height = width, height
         else:
             render_width, render_height = width, height
 
-        # Run tachyon renderer with optimizations for speed
+        # Run tachyon renderer
         tachyon_args = ["tachyon", str(scene_path),
                         "-res", str(render_width), str(render_height),
                         "-format", "TGA", "-o", str(tga_path)]
 
-        # Add speed optimizations for fast mode
+        # Add antialiasing for better quality (1 sample is fast but helps edges)
         if quality == "fast":
-            tachyon_args.extend(["-aasamples", "0"])  # No antialiasing
+            tachyon_args.extend(["-aasamples", "1"])
+        elif quality == "medium":
+            tachyon_args.extend(["-aasamples", "2"])
+        else:
+            tachyon_args.extend(["-aasamples", "4"])
 
         result = subprocess.run(tachyon_args, capture_output=True, text=True)
 
@@ -374,19 +404,32 @@ class VMDBridge:
         # If tachyon failed, raise error with details
         raise RuntimeError(f"Tachyon render failed: {result.stderr}")
 
+    async def capture_frame(self, width: int = 800, height: int = 600,
+                            quality: str = "fast") -> bytes:
+        """
+        Render and capture current frame.
+
+        Args:
+            width: Image width
+            height: Image height
+            quality: "fast" (low-res tachyon), "medium" (half-res), "high" (full res)
+
+        Returns:
+            PNG image as bytes
+        """
+        if self.current_mol_id is None:
+            raise RuntimeError("No structure loaded")
+
+        return await self._run_in_vmd_thread(self._capture_frame_sync, width, height, quality)
+
     async def capture_frame_base64(self, width: int = 800, height: int = 600,
                                     quality: str = "fast") -> str:
         """Capture frame and return as base64 string."""
         frame_bytes = await self.capture_frame(width, height, quality)
         return base64.b64encode(frame_bytes).decode('utf-8')
 
-    async def set_representation(self, reps: List[Representation]) -> None:
-        """Set molecular representations."""
-        if self.current_mol_id is None:
-            return
-
-        mol_id = self.current_mol_id
-
+    def _set_representation_sync(self, mol_id: int, reps: List[Representation]) -> None:
+        """Set molecular representations - must run in VMD thread."""
         # Clear existing reps
         while molrep.num(mol_id) > 0:
             molrep.delrep(mol_id, 0)
@@ -401,21 +444,27 @@ class VMDBridge:
                 material=rep.material
             )
 
+    async def set_representation(self, reps: List[Representation]) -> None:
+        """Set molecular representations."""
+        if self.current_mol_id is None:
+            return
+        await self._run_in_vmd_thread(self._set_representation_sync, self.current_mol_id, reps)
+
     async def execute_tcl(self, command: str) -> str:
         """Execute arbitrary Tcl command and return result."""
-        return evaltcl(command)
+        return await self._run_in_vmd_thread(evaltcl, command)
 
     async def rotate(self, axis: str, degrees: float) -> None:
         """Rotate view around axis."""
-        evaltcl(f"rotate {axis} by {degrees}")
+        await self._run_in_vmd_thread(evaltcl, f"rotate {axis} by {degrees}")
 
     async def scale(self, factor: float) -> None:
         """Scale/zoom view."""
-        evaltcl(f"scale by {factor}")
+        await self._run_in_vmd_thread(evaltcl, f"scale by {factor}")
 
     async def reset_view(self) -> None:
         """Reset to default view."""
-        evaltcl("display resetview")
+        await self._run_in_vmd_thread(evaltcl, "display resetview")
 
 
 # Convenience function for standalone testing

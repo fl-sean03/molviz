@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CameraState, StructureInfo, WSMessage } from '../types';
-import { cameraToVMDMatrix } from '../utils/cameraConvert';
+import { cameraToVMDMatrix, setVMDInitialCamera, setInitialWebGLZoom } from '../utils/cameraConvert';
 
 interface UseVMDConnectionReturn {
   connected: boolean;
@@ -23,6 +23,7 @@ export function useVMDConnection(url: string): UseVMDConnectionReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingResolversRef = useRef<Map<string, (value: any) => void>>(new Map());
+  const initialZoomCapturedRef = useRef<boolean>(false);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
@@ -79,7 +80,10 @@ export function useVMDConnection(url: string): UseVMDConnectionReturn {
         break;
 
       case 'camera_update':
-        // Could sync back to fast viewport if needed
+        // Capture VMD's camera state (scale/center) for proper sync
+        if (message.data?.scale && message.data?.center) {
+          setVMDInitialCamera(message.data.scale, message.data.center);
+        }
         break;
 
       case 'error':
@@ -101,8 +105,16 @@ export function useVMDConnection(url: string): UseVMDConnectionReturn {
 
   // Load structure
   const loadStructure = useCallback((path: string): Promise<StructureInfo | null> => {
+    // Reset zoom capture flag for new structure
+    initialZoomCapturedRef.current = false;
+
     return new Promise((resolve) => {
-      pendingResolversRef.current.set('load_structure', resolve);
+      pendingResolversRef.current.set('load_structure', (data: StructureInfo) => {
+        // Request VMD's camera state after structure loads
+        // This gives us the proper scale/center for the molecule
+        send({ type: 'get_camera' });
+        resolve(data);
+      });
       setLoading(true);
       send({ type: 'load_structure', data: { path } });
 
@@ -118,6 +130,12 @@ export function useVMDConnection(url: string): UseVMDConnectionReturn {
 
   // Update camera (debounced on server side)
   const updateCamera = useCallback((camera: CameraState) => {
+    // Capture initial zoom on first camera update after structure load
+    if (!initialZoomCapturedRef.current && camera.zoom > 0) {
+      setInitialWebGLZoom(camera.zoom);
+      initialZoomCapturedRef.current = true;
+    }
+
     const vmdMatrix = cameraToVMDMatrix(camera);
     setLoading(true);
     send({ type: 'set_camera', data: vmdMatrix });
