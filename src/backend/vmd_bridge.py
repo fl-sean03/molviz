@@ -20,11 +20,18 @@ import base64
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# Will be imported when running in vmd-env
+# VMD module references - must be imported in VMD thread
+# These are set in _init_vmd_sync to avoid SEGV
+_vmd_module = None
+_molecule = None
+_molrep = None
+_display = None
+_evaltcl = None
+
+# Check if vmd-python is installed (but don't import yet)
 try:
-    import vmd
-    from vmd import molecule, molrep, display, evaltcl
-    VMD_AVAILABLE = True
+    import importlib.util
+    VMD_AVAILABLE = importlib.util.find_spec("vmd") is not None
 except ImportError:
     VMD_AVAILABLE = False
 
@@ -109,14 +116,33 @@ class VMDBridge:
         return loop.run_in_executor(_vmd_executor, lambda: func(*args, **kwargs))
 
     def _init_vmd_sync(self) -> None:
-        """Initialize VMD - must run in VMD thread."""
+        """Initialize VMD - must run in VMD thread.
+
+        IMPORTANT: VMD must be imported in the same thread where it will be used.
+        Importing in the main thread and using in another causes SEGV.
+        """
+        global _vmd_module, _molecule, _molrep, _display, _evaltcl
+
         self._vmd_thread_id = threading.current_thread().ident
-        evaltcl("display projection Orthographic")
-        evaltcl("display depthcue off")
-        evaltcl("color Display Background white")
-        evaltcl("axes location Off")
-        evaltcl("display shadows on")
-        evaltcl("display ambientocclusion on")
+
+        # Import VMD in this thread
+        import vmd
+        from vmd import molecule, molrep, display, evaltcl
+
+        # Store references globally for use by other _sync methods
+        _vmd_module = vmd
+        _molecule = molecule
+        _molrep = molrep
+        _display = display
+        _evaltcl = evaltcl
+
+        # Configure display
+        _evaltcl("display projection Orthographic")
+        _evaltcl("display depthcue off")
+        _evaltcl("color Display Background white")
+        _evaltcl("axes location Off")
+        _evaltcl("display shadows on")
+        _evaltcl("display ambientocclusion on")
 
     async def start(self) -> None:
         """Start Xvfb and initialize VMD."""
@@ -168,30 +194,30 @@ class VMDBridge:
     def _load_structure_sync(self, path_str: str, file_type: str) -> tuple:
         """Load structure in VMD thread - returns (mol_id, atom_count, residue_count, minmax_str)."""
         # Clear existing molecules
-        for i in range(molecule.num()):
-            molecule.delete(molecule.listall()[0])
+        for i in range(_molecule.num()):
+            _molecule.delete(_molecule.listall()[0])
 
         # Load new molecule
-        mol_id = molecule.load(file_type, path_str)
-        molecule.set_top(mol_id)
+        mol_id = _molecule.load(file_type, path_str)
+        _molecule.set_top(mol_id)
 
         # Get structure info
-        atom_count = molecule.numatoms(mol_id)
+        atom_count = _molecule.numatoms(mol_id)
         try:
-            residue_count = int(evaltcl(f"llength [lsort -unique [[atomselect {mol_id} all] get resid]]"))
+            residue_count = int(_evaltcl(f"llength [lsort -unique [[atomselect {mol_id} all] get resid]]"))
         except:
             residue_count = 1
 
         # Get bounding box
-        evaltcl("set sel [atomselect top all]")
-        minmax = evaltcl("measure minmax $sel")
-        evaltcl("$sel delete")
+        _evaltcl("set sel [atomselect top all]")
+        minmax = _evaltcl("measure minmax $sel")
+        _evaltcl("$sel delete")
 
         # Setup default representation
         self._setup_default_representation_sync(mol_id)
 
         # Reset view
-        evaltcl("display resetview")
+        _evaltcl("display resetview")
 
         return mol_id, atom_count, residue_count, minmax
 
@@ -233,52 +259,52 @@ class VMDBridge:
     def _setup_default_representation_sync(self, mol_id: int) -> None:
         """Setup default molecular representation using Tcl commands. Must run in VMD thread."""
         # Delete default rep
-        while molrep.num(mol_id) > 0:
-            molrep.delrep(mol_id, 0)
+        while _molrep.num(mol_id) > 0:
+            _molrep.delrep(mol_id, 0)
 
         # Check what atoms we have
-        has_pt = int(evaltcl('llength [[atomselect top {name "PT.*"}] list]')) > 0
-        has_c = int(evaltcl('llength [[atomselect top {name "C.*"}] list]')) > 0
+        has_pt = int(_evaltcl('llength [[atomselect top {name "PT.*"}] list]')) > 0
+        has_c = int(_evaltcl('llength [[atomselect top {name "C.*"}] list]')) > 0
 
         if has_pt:
             # Pt nanoparticle system - use Tcl for proper color handling
-            evaltcl('mol representation VDW 0.8 20')
-            evaltcl('mol color ColorID 2')  # Gray
-            evaltcl('mol selection {name "PT.*"}')
-            evaltcl('mol material AOShiny')
-            evaltcl('mol addrep top')
+            _evaltcl('mol representation VDW 0.8 20')
+            _evaltcl('mol color ColorID 2')  # Gray
+            _evaltcl('mol selection {name "PT.*"}')
+            _evaltcl('mol material AOShiny')
+            _evaltcl('mol addrep top')
 
             if has_c:
                 # Carbon - black CPK
-                evaltcl('mol representation CPK 1.0 0.3 20 20')
-                evaltcl('mol color ColorID 16')
-                evaltcl('mol selection {name "C.*"}')
-                evaltcl('mol addrep top')
+                _evaltcl('mol representation CPK 1.0 0.3 20 20')
+                _evaltcl('mol color ColorID 16')
+                _evaltcl('mol selection {name "C.*"}')
+                _evaltcl('mol addrep top')
 
                 # Nitrogen - blue VDW
-                evaltcl('mol representation VDW 0.6 20')
-                evaltcl('mol color ColorID 0')
-                evaltcl('mol selection {name "N.*"}')
-                evaltcl('mol addrep top')
+                _evaltcl('mol representation VDW 0.6 20')
+                _evaltcl('mol color ColorID 0')
+                _evaltcl('mol selection {name "N.*"}')
+                _evaltcl('mol addrep top')
 
                 # Hydrogen - white CPK
-                evaltcl('mol representation CPK 0.5 0.2 20 20')
-                evaltcl('mol color ColorID 8')
-                evaltcl('mol selection {name "H.*"}')
-                evaltcl('mol addrep top')
+                _evaltcl('mol representation CPK 0.5 0.2 20 20')
+                _evaltcl('mol color ColorID 8')
+                _evaltcl('mol selection {name "H.*"}')
+                _evaltcl('mol addrep top')
 
                 # Bonds - black licorice
-                evaltcl('mol representation Licorice 0.15 20 20')
-                evaltcl('mol color ColorID 16')
-                evaltcl('mol selection {not name "PT.*"}')
-                evaltcl('mol addrep top')
+                _evaltcl('mol representation Licorice 0.15 20 20')
+                _evaltcl('mol color ColorID 16')
+                _evaltcl('mol selection {not name "PT.*"}')
+                _evaltcl('mol addrep top')
         else:
             # Generic molecule - element coloring
-            evaltcl('mol representation CPK 1.0 0.3 20 20')
-            evaltcl('mol color Element')
-            evaltcl('mol selection {all}')
-            evaltcl('mol material AOShiny')
-            evaltcl('mol addrep top')
+            _evaltcl('mol representation CPK 1.0 0.3 20 20')
+            _evaltcl('mol color Element')
+            _evaltcl('mol selection {all}')
+            _evaltcl('mol material AOShiny')
+            _evaltcl('mol addrep top')
 
     async def _setup_default_representation(self, mol_id: int) -> None:
         """Setup default molecular representation - async wrapper."""
@@ -310,9 +336,9 @@ class VMDBridge:
             return "{ { " + " ".join(rows) + " } }"
 
         try:
-            evaltcl(f"molinfo top set rotate_matrix {matrix_to_tcl(camera.rotate)}")
-            evaltcl(f"molinfo top set center_matrix {matrix_to_tcl(camera.center)}")
-            evaltcl(f"molinfo top set scale_matrix {matrix_to_tcl(camera.scale)}")
+            _evaltcl(f"molinfo top set rotate_matrix {matrix_to_tcl(camera.rotate)}")
+            _evaltcl(f"molinfo top set center_matrix {matrix_to_tcl(camera.center)}")
+            _evaltcl(f"molinfo top set scale_matrix {matrix_to_tcl(camera.scale)}")
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Failed to set camera: {e}")
@@ -334,10 +360,10 @@ class VMDBridge:
             # Reshape to 4x4
             return [floats[i:i+4] for i in range(0, 16, 4)]
 
-        rotate = parse_matrix(evaltcl("molinfo top get rotate_matrix"))
-        center = parse_matrix(evaltcl("molinfo top get center_matrix"))
-        scale = parse_matrix(evaltcl("molinfo top get scale_matrix"))
-        global_ = parse_matrix(evaltcl("molinfo top get global_matrix"))
+        rotate = parse_matrix(_evaltcl("molinfo top get rotate_matrix"))
+        center = parse_matrix(_evaltcl("molinfo top get center_matrix"))
+        scale = parse_matrix(_evaltcl("molinfo top get scale_matrix"))
+        global_ = parse_matrix(_evaltcl("molinfo top get global_matrix"))
 
         return CameraMatrix(
             rotate=rotate,
@@ -361,7 +387,7 @@ class VMDBridge:
         tga_path = self.temp_dir / "frame.tga"
 
         # Generate Tachyon scene file
-        evaltcl(f'render Tachyon "{scene_path}"')
+        _evaltcl(f'render Tachyon "{scene_path}"')
 
         # Adjust resolution for quality
         # Render at target resolution to avoid blur from upscaling
@@ -431,12 +457,12 @@ class VMDBridge:
     def _set_representation_sync(self, mol_id: int, reps: List[Representation]) -> None:
         """Set molecular representations - must run in VMD thread."""
         # Clear existing reps
-        while molrep.num(mol_id) > 0:
-            molrep.delrep(mol_id, 0)
+        while _molrep.num(mol_id) > 0:
+            _molrep.delrep(mol_id, 0)
 
         # Add new reps
         for rep in reps:
-            molrep.addrep(
+            _molrep.addrep(
                 mol_id,
                 style=rep.style,
                 color=rep.color,
