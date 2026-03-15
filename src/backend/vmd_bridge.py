@@ -383,51 +383,40 @@ class VMDBridge:
         from PIL import Image
 
         output_path = self.temp_dir / "frame.png"
+        scene_path = self.temp_dir / "scene.dat"
         tga_path = self.temp_dir / "frame.tga"
 
+        # Generate Tachyon scene file
+        _evaltcl(f'render Tachyon "{scene_path}"')
+
+        # Run tachyon renderer
+        tachyon_args = ["tachyon", str(scene_path),
+                        "-res", str(width), str(height),
+                        "-format", "TGA", "-o", str(tga_path)]
+
+        # Quality settings - no mediumshade (breaks lighting)
         if quality == "fast":
-            # Use OpenGL snapshot for fast interactive updates
-            # Much faster than Tachyon ray tracing
-            _evaltcl(f'display resize {width} {height}')
-            _evaltcl(f'render TachyonInternal "{tga_path}"')
+            tachyon_args.extend(["-aasamples", "0"])  # No AA for speed
+        elif quality == "medium":
+            tachyon_args.extend(["-aasamples", "2"])
+        else:  # high
+            tachyon_args.extend(["-aasamples", "4"])
 
-            if tga_path.exists():
-                img = Image.open(tga_path)
-                # Convert to JPEG for faster transfer
-                jpeg_path = self.temp_dir / "frame.jpg"
-                img.save(jpeg_path, "JPEG", quality=90, optimize=False)
-                tga_path.unlink()
-                with open(jpeg_path, 'rb') as f:
-                    return f.read()
-        else:
-            # Use Tachyon ray tracer for high quality
-            scene_path = self.temp_dir / "scene.dat"
-            _evaltcl(f'render Tachyon "{scene_path}"')
+        result = subprocess.run(tachyon_args, capture_output=True, text=True)
 
-            tachyon_args = ["tachyon", str(scene_path),
-                            "-res", str(width), str(height),
-                            "-format", "TGA", "-o", str(tga_path)]
+        if tga_path.exists():
+            img = Image.open(tga_path)
 
-            # Quality settings with proper lighting
-            if quality == "medium":
-                tachyon_args.extend(["-aasamples", "2"])
-            else:  # high
-                tachyon_args.extend(["-aasamples", "4", "-shade_phong"])
+            # Use JPEG for faster transfer
+            jpeg_path = self.temp_dir / "frame.jpg"
+            img.save(jpeg_path, "JPEG", quality=92, optimize=False)
+            tga_path.unlink()
+            if scene_path.exists():
+                scene_path.unlink()
+            with open(jpeg_path, 'rb') as f:
+                return f.read()
 
-            result = subprocess.run(tachyon_args, capture_output=True, text=True)
-
-            if tga_path.exists():
-                img = Image.open(tga_path)
-                img.save(output_path, "PNG", optimize=False)
-                tga_path.unlink()
-                if scene_path.exists():
-                    scene_path.unlink()
-                with open(output_path, 'rb') as f:
-                    return f.read()
-
-            raise RuntimeError(f"Tachyon render failed: {result.stderr}")
-
-        raise RuntimeError("Frame capture failed")
+        raise RuntimeError(f"Tachyon render failed: {result.stderr}")
 
     async def capture_frame(self, width: int = 800, height: int = 600,
                             quality: str = "fast") -> bytes:
